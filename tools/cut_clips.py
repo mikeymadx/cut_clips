@@ -1,7 +1,11 @@
 import csv
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
+
+import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.track_subject import write_tracked_vertical
@@ -29,6 +33,16 @@ def to_seconds(time_str):
     return float(time_str)
 
 
+def get_video_duration(path):
+    cap = cv2.VideoCapture(str(path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    if fps > 0:
+        return frame_count / fps
+    return 0.0
+
+
 def cut_clip(row, horizontal=True, vertical=True, source_override=None, debug=False):
     initial = Path(row["initial_video_title"].strip()).stem
     start = row["start"].strip()
@@ -42,12 +56,19 @@ def cut_clip(row, horizontal=True, vertical=True, source_override=None, debug=Fa
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    duration = to_seconds(end) - to_seconds(start)
+    start_s = to_seconds(start)
+    end_s = to_seconds(end)
+    duration = end_s - start_s
+    source_duration = get_video_duration(source)
+
+    print(f"[INFO] Source: {source.name}  ({source_duration:.1f}s total)")
+    print(f"[INFO] Cut window: {start} → {end}  ({duration:.1f}s)")
+
     if vertical and duration > 60:
         print(f"[WARN] '{cut}' is {duration:.1f}s — exceeds YouTube Shorts 60s limit for vertical")
 
     h_out = OUTPUT_DIR / f"{initial}-{cut}-horizontal.mp4"
-    v_out = OUTPUT_DIR / f"{initial}-{cut}-vertical.mp4"
+    v_out = OUTPUT_DIR / f"{initial}-{cut}-vertical{'_DEBUG' if debug else ''}.mp4"
 
     if horizontal:
         if h_out.exists():
@@ -68,7 +89,7 @@ def cut_clip(row, horizontal=True, vertical=True, source_override=None, debug=Fa
             print(f"[SKIP] {v_out.name} already exists")
         else:
             print(f"[CUT]  {v_out.name}")
-            write_tracked_vertical(str(source), to_seconds(start), to_seconds(end), str(v_out), debug=debug)
+            write_tracked_vertical(str(source), start_s, end_s, str(v_out), debug=debug)
             print(f"[DONE] {v_out}")
 
 
@@ -92,16 +113,31 @@ def main():
             i += 1
 
     if not filtered:
-        print("Usage: python tools/cut_clips.py [-h] [-v] [-s /path/to/video] clips.csv")
+        print("Usage: python tools/cut_clips.py [-h] [-v] [-d] [-s /path/to/video] clips.csv")
         print("  -h              horizontal only")
         print("  -v              vertical only")
+        print("  -d              debug mode (annotated bounding boxes, _DEBUG in filename)")
         print("  -s /path/to/video  override source video (skips footage/ lookup)")
         sys.exit(1)
 
-    print("[START] cut_clips running..." + (" [DEBUG]" if debug else ""))
-    with open(filtered[0], newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            cut_clip(row, horizontal=horizontal, vertical=vertical, source_override=source_override, debug=debug)
+    csv_path = filtered[0]
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+
+    print(f"[START] cut_clips running{' [DEBUG]' if debug else ''}")
+    print(f"[INFO]  Date/time : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[INFO]  CSV       : {csv_path}")
+    print(f"[INFO]  Clips     : {len(rows)}")
+    if source_override:
+        print(f"[INFO]  Source override: {source_override}")
+
+    for row in rows:
+        cut = row["cut_title"].strip()
+        t0 = time.time()
+        cut_clip(row, horizontal=horizontal, vertical=vertical, source_override=source_override, debug=debug)
+        elapsed = time.time() - t0
+        print(f"[TIME]  '{cut}' completed in {elapsed:.1f}s")
+
     print("[DONE]  cut_clips finished.")
 
 

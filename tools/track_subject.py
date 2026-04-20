@@ -2,33 +2,12 @@ import subprocess
 import sys
 import numpy as np
 import cv2
-from ultralytics import YOLO
-
-_body_model = None
-_face_cascade = None
-
-
-def _get_body_model():
-    global _body_model
-    if _body_model is None:
-        _body_model = YOLO("yolov8n.pt")
-    return _body_model
-
-
-def _get_face_cascade():
-    global _face_cascade
-    if _face_cascade is None:
-        _face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-    return _face_cascade
+from tools.detect_mediapipe import detect_subject
 
 
 def _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every=3):
-    """Run face detection (falling back to body) on sampled frames.
+    """Run subject detection on sampled frames.
     Returns (per-frame crop_x list, per-frame annotations)."""
-    body_model = _get_body_model()
-    face_cascade = _get_face_cascade()
     total = end_frame - start_frame
     raw_xs = [None] * total
     annotations = [None] * total
@@ -42,33 +21,10 @@ def _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every=
         if i % sample_every != 0:
             continue
 
-        h, fw = frame.shape[:2]
-        small = cv2.resize(frame, (fw // 2, h // 2))
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-
-        # Try face detection first (Haar cascade, results in half-res coords)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
-        if len(faces) > 0:
-            # faces = (x, y, w, h) — pick largest, scale to full res
-            areas = faces[:, 2] * faces[:, 3]
-            x, y, w, h_f = faces[areas.argmax()] * 2
-            selected = np.array([x, y, x + w, y + h_f], dtype=float)
-            center_x = x + w / 2.0
-            crop_x = float(np.clip(center_x - crop_w / 2, 0, fw - crop_w))
-            raw_xs[i] = crop_x
-            annotations[i] = (selected.reshape(1, 4), selected, "face")
-            continue
-
-        # Fall back to body detection
-        body_results = body_model(small, classes=[0], verbose=False, imgsz=640)
-        if body_results and body_results[0].boxes is not None and len(body_results[0].boxes):
-            boxes = body_results[0].boxes.xyxy.cpu().numpy() * 2.0
-            areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-            selected = boxes[areas.argmax()]
-            center_x = (selected[0] + selected[2]) / 2.0
-            crop_x = float(np.clip(center_x - crop_w / 2, 0, fw - crop_w))
-            raw_xs[i] = crop_x
-            annotations[i] = (boxes, selected, "body")
+        fh, fw = frame.shape[:2]
+        result = detect_subject(frame, fw, fh, crop_w)
+        if result is not None:
+            raw_xs[i], annotations[i] = result
 
     # Forward-fill None values; fall back to default_x
     last = default_x
