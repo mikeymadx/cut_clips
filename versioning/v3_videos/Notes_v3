@@ -1,0 +1,8 @@
+What we diagnosed and fixed:
+
+Root cause of face going off-screen: Body detection was useless for close-up shots — when the subject fills the frame, the body bbox center is always near frame center so the crop never pans.
+Fix: Switched to a hybrid detector — OpenCV Haar cascade tries face detection first every sampled frame, falls back to YOLOv8 body detection if no face found. Works across both close-up and wide shots in the same clip.
+Also added: -d debug flag that renders the vertical clip with annotated bounding boxes (green = face, yellow = body, blue lines = crop window) — this was the key tool that let us diagnose the body-fills-frame problem.
+Also added: [START] / [DONE] console messages so you can tell if the program is hung.
+Smoothing alpha landed at 0.5 (was 0.15 originally).
+Where to pick up next: CLI flag to set alpha per clip, and potentially click-to-select subject if the wrong person ever gets tracked.
