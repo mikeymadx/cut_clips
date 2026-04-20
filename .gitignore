@@ -1,0 +1,25 @@
+# Secrets
+.env
+credentials.json
+token.json
+
+# Temp / intermediates
+.tmp/
+
+# Large source footage (don't commit raw video files)
+footage/*.mp4
+footage/*.mov
+footage/*.MOV
+footage/*.MP4
+footage/*.m4v
+footage/*.M4V
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# YOLOv8 model weights (downloaded on first run)
+*.pt
