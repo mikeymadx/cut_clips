@@ -1,0 +1,63 @@
+MORK Notes : we're adding details to allow tagging of people by shirt color - I suspect this will become problematic if 
+the iphone footage is dark and not well colored (2084 or random concert footage as example). But I would love to keep iterating on this.
+Need to add a --help to this or like a bash --help script or something. 
+
+Also I would like for the workflow to allow us to specify what the subject frame should focus on (maybe even 2). There
+is a moment in the testing video where MediaPipe determines Mikey is the subject of focus (he's closest to the camera) but it would be a cool moment to frame it so Charlie and Tommy are the "focus" shot instead. There doesn't need to be a zoom on it just would be cool to frame that moment. 
+
+Need to add time and meta data information to the planning tool also. I like the details. 
+
+
+
+
+Session Summary (2026-04-19)
+
+Researched Remotion — evaluated whether the JS/React video-generation framework had any fit in this pipeline. Verdict: it solves the opposite problem (generating video from code, not processing existing footage). Filed as a long-term idea for branded titles/lower thirds only, not relevant to current work.
+
+Built per-segment subject hint system — lets you tell the tracker which band member to follow, per scene, using plain color descriptions like yellow shirt. Full implementation across 5 files + 1 new shared utility:
+
+tools/color_utils.py (new) — color matching engine. NAMED_COLORS table (yellow, orange, red, green, cyan, blue, purple, pink, white, black) maps to HSV ranges. score_color() samples the torso region of a bounding box and returns a 0–1 match score. pick_by_hint() selects the best-matching candidate from all detections.
+
+tools/detect_mediapipe.py — now returns up to N detected people per frame (not just 1). Default cap: 3 (the band), configurable up to 5, or unlimited via --all-subjects. Annotation structure changed from (all_boxes, selected_box, mode) to (all_boxes, selected_idx, mode). Color hint applied at detection time.
+
+tools/detect_yolo.py — same multi-subject + hint pattern for the Haar/YOLO fallback path.
+
+tools/track_subject.py — subject_hint, max_subjects, all_subjects threaded through _detect_frames → detect_crop_trajectory → write_tracked_vertical. Debug video now draws non-tracked people as gray boxes labeled P1, P2, P3.
+
+tools/plan_video.py — added --max-subjects (default 3, max 5) and --all-subjects flags. Debug video now shows all detected people with P-labels so you can identify who's who before filling in subject_focus.
+
+tools/cut_clips.py — added --planning-csv, --max-subjects, --all-subjects flags. Loads the planning CSV and maps each clip's time range to the dominant planning segment by overlap, pulling subject_focus as the color hint passed to tracking.
+
+Also shipped: README.md (project overview, current + future workflow, version history table) and committed v4/v5/v6 session notes.
+
+Where to pick up next: Run plan_video.py with --all-subjects on real show footage, verify all 3 band members appear as labeled boxes in the debug video, then test a color-hinted cut with --planning-csv
+
+
+
+MORK TODO - Debugging this one is a pain. we're not seeing the person tagging like we should. 
+
+MORK TODO - I want an option to just 9:16 crop the whole video. 
+
+MORK TODO - I want to re-evaluate how we provide details on the cutting. It would be cool to have some sort of UI editor to have up alongside the debug analysis videos so that we can quickly write notes and make edits to what we want the scenes to be and the focuses to be. 
+
+MORK TODO - I want our labeling of the subject to ALWAYS be P1, to syncronize our notes back and forth. 
+
+
+SESSION Notes Part 2 - we broke this set of changes into 2 sessions.
+Still not able to target the subject matter but I think it's because we're needing more critical details.
+
+Session Summary (2026-04-20)
+
+Picked up from v7 where color hinting was built but untested. First run revealed two bugs before any real testing could happen:
+
+Bug 1 — Wrong positional argument. cut_clips.py expects a clips CSV as its first argument, not the video file. The video file goes via -s. Clips CSV lives at footage/magic_clips/magic_clips.csv.
+
+Bug 2 — Color hint sampling wrong region. MediaPipe returns face-only bounding boxes. The score_color() function in color_utils.py samples the 40–75% height region of the box assuming full-body — on a face box that samples the chin/neck, not the shirt. Fixed by building extended boxes (face bottom + 2× face height downward) used only for color scoring; original face boxes still drive crop centering.
+
+Color hint still not working reliably. Even after the fix, the crop wasn't targeting P1 (yellow shirt, right side). Root cause not yet confirmed — likely the lighting in this footage (desert shoot) is making HSV color scoring unreliable. Orange shirt test also failed. This is unresolved.
+
+New debug tooling added:
+
+write_debug_horizontal() — full-frame 1920x1080 debug video with detection boxes, green/gray labels, P-numbers. Renders as ...-horizontal_DEBUG.mp4 when -d is passed. Much easier to read than vertical debug.
+Segment overlay on both debug outputs — top-left corner shows active segment number, time range, current timestamp, and active hint. Driven by the planning CSV.
+Where to pick up next: The horizontal debug video should make it much easier to confirm which person the detector is actually selecting and why. Next step is either (a) implement positional hints (right/left) as a reliable fallback to color, or (b) watch the new horizontal debug and diagnose why color scoring is still picking the wrong person.

@@ -1,0 +1,78 @@
+MORK NOTES : We added a User Interface for editing and selecting Scenes. 
+Maybe it's overkill but at least it lets us edit and quickly decide what
+the scenes should be. There are a lot of improvement ideas here but the IMMEDIATE one I can think of is that if I adjust the starts and stops of scenes, I want the other scenes to automatically conform. 
+
+
+Session summary — 2026-04-20
+
+Built tools/edit_planning.py — a local web UI tool for reviewing and editing plan_video.py output before cutting. Single self-contained file (Flask backend + embedded HTML/CSS/JS). Added flask to requirements.txt.
+
+Features:
+
+Side-by-side debug video player + proportional segment timeline (blue = face, amber = body, red = low confidence)
+Two-way video sync — clicking a segment seeks the video; active segment highlights as video plays
+Editable fields: start_s, end_s, label, subject_focus, description, pan_plan
+Adjacent segment cascade — adjusting end_s of segment N automatically updates start_s of segment N+1 (and vice versa), keeping no gaps or overlaps
+duration_s auto-recalculates client-side on every edit
+Explicit save (Ctrl+S or button), dirty indicator, atomic write to both JSON and sibling CSV
+Workflow for Magic_V2B:
+
+python3 tools/plan_video.py footage/magic_clips/Magic_V2B_Yellow_Charlie.mov
+python3 tools/edit_planning.py --json .tmp/planning/.../scenes_planning.json --video .tmp/planning/.../debug_planning.mp4
+python3 tools/cut_clips.py --planning-csv .tmp/planning/.../scenes_planning.csv footage/magic_clips/magic_clips.csv
+
+
+MORK NOTES : We continued with the session to add object permanence to the tracking so that it follows an object moving this should allow us to have a better idea on subject focus and to get rid of the jump cuts. 
+
+
+
+Session Summary
+Goal: Replace per-frame-only detection with cross-frame object tracking so the system can identify who is most important in a multi-person shot and commit to following them.
+
+What was built:
+
+The existing YOLO + MediaPipe detectors had no concept of identity across frames — each frame was processed independently. We added ByteTrack (already bundled in ultralytics) which assigns persistent integer track IDs to each person frame-to-frame, then scores each track on four signals: box area (0.35), face presence (0.25), time on screen (0.20), and center proximity (0.15).
+
+5 files changed:
+
+File	Change
+detect_yolo.py	Added detect_bodies_tracked() and reset_body_tracker()
+detect_mediapipe.py	Added get_face_boxes() helper
+plan_video.py	Tracker runs every frame; 5 new fields written to JSON/CSV
+track_subject.py	_detect_frames() now picks a focus track and locks the crop trajectory to that person
+edit_planning.py	5 new read-only columns in the planning UI, with importance color-coded green/yellow/red
+New fields in planning JSON/CSV/UI: num_tracks, focus_track_id, focus_importance, focus_has_face, focus_area_pct
+
+One potential gotcha for next session: If model.track() throws an error, run pip install lapx — ByteTrack needs a linear assignment solver that isn't always installed by default with ultralytics.
+
+
+Added 
+Good question. ByteTrack does assign persistent IDs to all detected persons — but the planning output only saves the winner.
+
+From the JSON/CSV, you get:
+
+num_tracks — how many unique track IDs were seen in the segment
+focus_track_id / focus_importance / focus_has_face / focus_area_pct — only for the top-scoring track
+The per-track track_obs dict inside _segment_track_metrics() holds scores for every person, but after picking the focus track, the rest are discarded — the other IDs and their scores never make it into the output files.
+
+So in the editor, if you see num_tracks: 4, you know there were 4 people with ByteTrack IDs in that segment, but you only see the data for the one that scored highest. The other three are invisible in the UI.
+
+If you want P2/P3 data exposed (e.g. to pick an alternate focus manually), the change would be in _segment_track_metrics() in plan_video.py — instead of just returning the top track, it'd need to return a ranked list, and the JSON schema + editor table would need to show it. That's not currently implemented.
+
+
+
+
+
+MORK NOTES : We added the ability to define our own segments within the clip. This allows us to see and interact with what we want as we need to. 
+
+The extra tracking data is interesting and allows us to potentially add a determining factor in the future. 
+
+
+Three changes were made across two files:
+
+plan_video.py
+
+JSON-only output — removed import csv, SCENE_FIELDS, and the CSV write block. Only .json is written now.
+--from-json PATH flag — skips auto-segmentation and uses start_s/end_s/trigger from an existing JSON as fixed scene boundaries. Re-runs full detection and metrics within those windows. Preserves user-filled fields (label, subject_focus, description, pan_plan) from the source JSON.
+edit_planning.py
+3. Split scene in UI — added a ✂ button as a last column on every row. Clicking it expands inline to a number input pre-filled at the segment midpoint. On confirm, POSTs to a new /split endpoint that splits the segment in two (second half gets trigger: "manual_split", blank user fields, re-sequenced segment numbers). Result marks dirty; save to persist. Also removed the CSV rewrite from the /save endpoint — saves JSON only.
