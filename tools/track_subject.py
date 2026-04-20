@@ -4,6 +4,12 @@ import numpy as np
 import cv2
 from tools.detect_mediapipe import detect_subject
 
+try:
+    from scipy.ndimage import gaussian_filter1d as _gaussian_filter1d
+    _SCIPY = True
+except ImportError:
+    _SCIPY = False
+
 
 def _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every=3):
     """Run subject detection on sampled frames.
@@ -26,26 +32,54 @@ def _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every=
         if result is not None:
             raw_xs[i], annotations[i] = result
 
-    # Forward-fill None values; fall back to default_x
-    last = default_x
-    for i in range(total):
-        if raw_xs[i] is not None:
-            last = raw_xs[i]
-        else:
-            raw_xs[i] = last
+    # Linear interpolation between known detections; edges use default_x / last known
+    known_indices = [i for i, v in enumerate(raw_xs) if v is not None]
+
+    if not known_indices:
+        raw_xs = [default_x] * total
+    else:
+        for i in range(known_indices[0]):
+            raw_xs[i] = default_x
+        for i in range(known_indices[-1] + 1, total):
+            raw_xs[i] = raw_xs[known_indices[-1]]
+        for a, b in zip(known_indices, known_indices[1:]):
+            if b - a <= 1:
+                continue
+            x_a, x_b = raw_xs[a], raw_xs[b]
+            steps = b - a
+            for j in range(1, steps):
+                t = j / steps
+                raw_xs[a + j] = x_a + t * (x_b - x_a)
 
     return raw_xs, annotations
 
 
-def _smooth(xs, alpha=0.5):
-    """Exponential moving average smoothing."""
-    smoothed = [xs[0]]
-    for x in xs[1:]:
-        smoothed.append(alpha * x + (1 - alpha) * smoothed[-1])
+def _median_filter(xs, kernel=7):
+    """Rolling median to remove single-frame outlier detections."""
+    if kernel <= 1:
+        return list(xs)
+    half = kernel // 2
+    n = len(xs)
+    result = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        result.append(float(np.median(xs[lo:hi])))
+    return result
+
+
+def _smooth(xs, alpha=0.5, sigma=3.0):
+    """Gaussian smoothing (acausal, no lag). Falls back to EMA if scipy unavailable."""
+    arr = np.array(xs, dtype=float)
+    if _SCIPY:
+        return list(_gaussian_filter1d(arr, sigma=sigma))
+    smoothed = [arr[0]]
+    for x in arr[1:]:
+        smoothed.append(alpha * float(x) + (1 - alpha) * smoothed[-1])
     return smoothed
 
 
-def detect_crop_trajectory(video_path, start_s, end_s, alpha=0.5):
+def detect_crop_trajectory(video_path, start_s, end_s, alpha=0.5, sigma=3.0, median_kernel=7):
     """Return per-frame crop_x values tracking the subject's face (or body fallback)."""
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -60,10 +94,10 @@ def detect_crop_trajectory(video_path, start_s, end_s, alpha=0.5):
     sample_every = 1 if (end_frame - start_frame) < 10 else 3
     raw_xs, _ = _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every)
     cap.release()
-    return _smooth(raw_xs, alpha=alpha)
+    return _smooth(_median_filter(raw_xs, kernel=median_kernel), alpha=alpha, sigma=sigma)
 
 
-def write_tracked_vertical(video_path, start_s, end_s, output_path, alpha=0.5, debug=False):
+def write_tracked_vertical(video_path, start_s, end_s, output_path, alpha=0.5, sigma=3.0, median_kernel=7, debug=False):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -84,7 +118,7 @@ def write_tracked_vertical(video_path, start_s, end_s, output_path, alpha=0.5, d
     print(f"[TRACK] Detecting subject in {total_frames} frames...")
     sample_every = 1 if total_frames < 10 else 3
     raw_xs, annotations = _detect_frames(cap, start_frame, end_frame, default_x, crop_w, sample_every)
-    smooth_xs = _smooth(raw_xs, alpha=alpha)
+    smooth_xs = _smooth(_median_filter(raw_xs, kernel=median_kernel), alpha=alpha, sigma=sigma)
 
     detected = sum(1 for x in raw_xs if x != default_x)
     if detected == 0:

@@ -1,0 +1,33 @@
+MORK Notes : We made a planning video that suggests different frames
+and main subjects and then spits out potential scenes from the video analysis. The goal
+is to use the analysis to decide what the best shots are and how to provide that detail to the app
+or claude when the video is being edited.
+
+--- Session Summary (2026-04-19) ---
+
+Built tools/plan_video.py — a new standalone planning tool that runs the existing subject-tracking
+pipeline (MediaPipe face + YOLOv8 body fallback, same as cut_clips) against a full raw video and
+outputs three files to .tmp/planning/{video_stem}/:
+
+  {stem}_debug_planning.mp4   — full-res debug video with detection boxes, crop window edges,
+                                 segment labels (top-left), and white flash at each segment boundary.
+                                 Supports --audio flag to mux the original audio track in.
+
+  {stem}_scenes_planning.csv  — scene breakdown, one row per segment, ready to fill in Google Sheets.
+  {stem}_scenes_planning.json — same data in JSON for programmatic use.
+
+Segmentation is adaptive — the tool splits on two triggers:
+  mode_change : tracker switches between face-detection and body-detection
+  crop_jump   : crop window position jumps > --jump-threshold pixels in one frame (default 150)
+A --min-segment guard (default 2.0s) prevents noise from creating tiny segments.
+
+Each scene row includes auto-computed fields (start/end times, dominant mode, detection rate,
+avg crop position, crop stability) plus four blank user-fillable columns: label, subject_focus,
+description, pan_plan. The intent is to watch the debug video, fill those in, and use the result
+as a shot list when running cut_clips.
+
+Also wrote PLAN_VIDEO_README.md in the project root — a full field reference explaining every
+column, what the values mean, how to read the debug video, and the end-to-end workflow.
+
+Tested against Magic_V2B_Yellow_Charlie — produced 5 segments, all mode_change triggers,
+detection rate 0.988–1.0 across all segments.

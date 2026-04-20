@@ -1,0 +1,36 @@
+What we shipped:
+
+tools/detect_yolo.py — original Haar+YOLOv8 logic extracted and preserved
+tools/detect_mediapipe.py — new BlazeFace detector (confidence ≥ 0.7), eliminates mic-stand false positives
+tools/track_subject.py — refactored to delegate to whichever detector is imported
+tools/cut_clips.py — _DEBUG filename suffix, startup metadata (date/time, clip count, source duration), per-clip timer
+Side events: Repo initialized on GitHub (v3-yolo-baseline + v4-mediapipe tags), versioning/ directory lost and Notes_v3 recovered.
+
+Where to pick up next: Tracking is working but has stability issues — alpha CLI flag per clip, and potentially per-clip subject hints in the CSV are the next logical improvements.
+
+
+Mork Notes : okay now there is a stability issue where the debug doesnt know what the preffered subject is. there are a lot of ways to resolve this and we need to plan what is the best option. I also want an unedited analysis of what the model is seeing - for instance we have cropping but I want to see the debug analysis sometime of the original video. Horizontal has no face or body analysis whatsoever. 
+
+
+ChatGPT Video Editing Notes:
+🎯 What I’d Recommend for YOU specifically
+
+You’re in a band content + scaling clips situation.
+
+Option A (Practical)
+
+Use:
+
+OpusClip (bulk clips)
+CapCut (manual polish)
+Option B (Power move 🔥)
+
+Build a lightweight AI-FFmpeg pipeline:
+
+Whisper → transcribe lyrics/live footage
+GPT → pick best moments
+FFmpeg → cut + caption + export
+
+👉 This becomes:
+
+“Upload show → get 20 clips automatically”

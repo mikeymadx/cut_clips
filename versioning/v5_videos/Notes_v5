@@ -1,0 +1,17 @@
+What we shipped (v5):
+
+tools/track_subject.py — three-stage smoothing pipeline replacing the old single EMA pass:
+
+1. Linear interpolation (replaces forward-fill): gaps between sampled detections are now ramped smoothly instead of snapping to the new position all at once.
+2. Median filter (_median_filter(), kernel=7): removes single-frame outlier detections (e.g. body/face mode switches) before smoothing. One bad frame can't swing the window.
+3. Gaussian smoothing (_smooth(), sigma=3.0): replaces EMA. Acausal (looks forward and back), no lag artifact. Falls back to EMA if scipy isn't installed.
+
+New optional params on write_tracked_vertical() and detect_crop_trajectory(): sigma=3.0, median_kernel=7. Existing callers unchanged.
+
+Where to pick up next: sigma (3.0) and median_kernel (7) are hardcoded defaults — a CLI flag (--sigma, --kernel) per clip would let you tune per-shot without touching code. Per-clip subject hints in the CSV were also previously discussed and still unbuilt.
+
+
+
+MORK Notes : New thought here - it would be cool to generate a planning version of the initial video. I want a new tool or concept in this project 
+that basically runs the subject tracking model against the raw video so I we can see what it sees and determines is considered the main subject. Then
+I want to use this information to generate a potential "script" or scene by scene recommendation on the video for what the 9:16 pan should look like. 
